@@ -62,14 +62,19 @@ Pencegahan kebocoran data antar-toko (*cross-tenant leakage*) ditegakkan melalui
 - Pelanggan di meja dapat memesan makanan langsung tanpa tiket antrean fisik (`orders.queue_id = NULL`).
 - Ditegakkan di database MySQL via **`UNIQUE KEY uq_orders_queue_id (queue_id)`**.
 
-### 3.2 Matriks Kombinasi `queues.source` dan `queues.nfc_card_id`
-Berdasarkan mekanisme NFC dan Barcode pada PRD Bab 2.3 dan 4.2.13:
+### 3.2 Matriks Kombinasi `queues.source` dan `queues.nfc_card_id` Saat Queue Dibuat
+Berdasarkan mekanisme NFC dan Barcode pada PRD Bab 2.3 dan 4.2.13, kombinasi berikut divalidasi ketika Queue baru dibuat:
 
 | Nilai `source` | Nilai `nfc_card_id` | Alur Operasional & Sumber Transaksi |
 | :--- | :---: | :--- |
-| **`nfc`** | **NOT NULL** *(Wajib)* | Pelanggan melakukan tap fisik pada chip NFC meja/kios. Nilai `nfc_card_id` diverifikasi dari hasil hash `public_token_hash`. |
+| **`nfc`** | **NOT NULL** *(Wajib saat pembuatan Queue)* | Pelanggan melakukan tap fisik pada chip NFC meja/kios. Nilai `nfc_card_id` diverifikasi dari hasil hash `public_token_hash`. |
 | **`barcode`** | **NOT NULL** *(Mayoritas)* atau **NULL** *(Khusus)* | **NOT NULL:** Pelanggan memindai QR code pada standee meja/kartu fisik yang memuat URL token kartu yang sama dengan NFC.<br>**NULL:** Jika toko memasang poster/banner QR umum di pintu masuk toko (akses toko umum tanpa identitas meja). |
-| **`manual`** | **NULL** *(Wajib)* | Kasir menambahkan nomor antrean secara manual melalui dashboard merchant (PRD 4.2.13: *"Tambah Antrean Manual"*). Tidak ada kartu NFC/meja yang terlibat. |
+| **`manual`** | **NULL** *(Wajib saat pembuatan Queue)* | Kasir menambahkan nomor antrean secara manual melalui dashboard merchant (PRD 4.2.13: *"Tambah Antrean Manual"*). Tidak ada kartu NFC/meja yang terlibat. |
+
+Ketentuan historis setelah Queue dibuat:
+- Jika NFC Card yang terkait dihapus secara fisik, foreign key `ON DELETE SET NULL` mengubah `queues.nfc_card_id` menjadi `NULL`; nilai `queues.source` tetap menyimpan sumber awal, termasuk `nfc`.
+- Queue historis dengan `source = 'nfc'` dan `nfc_card_id = NULL` setelah hard delete kartu diperbolehkan. Kombinasi historis ini bukan input yang valid untuk pembuatan Queue baru.
+- Soft delete NFC Card tidak memicu aksi foreign key; `queues.nfc_card_id` tetap merujuk ke kartu tersebut.
 
 ---
 
