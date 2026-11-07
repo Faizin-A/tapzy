@@ -45,6 +45,7 @@ class UserStoreModelTest extends TestCase
             $table->foreignId('store_id')->nullable()->constrained()->restrictOnDelete();
             $table->timestamps();
             $table->softDeletes();
+            $table->unsignedBigInteger('session_generation')->default(1);
         });
     }
 
@@ -161,6 +162,56 @@ class UserStoreModelTest extends TestCase
 
         $this->assertSame('merchant', $merchant->role);
         $this->assertSame($store->id, $merchant->store_id);
+    }
+
+    public function test_session_generation_is_not_mass_assignable(): void
+    {
+        $user = new User([
+            'name' => 'Generation test',
+            'email' => 'generation@example.test',
+            'session_generation' => 999,
+        ]);
+
+        $this->assertNull($user->session_generation);
+    }
+
+    public function test_bulk_user_delete_and_restore_are_rejected(): void
+    {
+        $store = $this->createStore();
+        $merchant = $this->createUser('merchant', $store->id);
+
+        try {
+            User::query()->whereKey($merchant->id)->update(['deleted_at' => now()]);
+            $this->fail('Bulk soft-delete updates must use UserSessionRevocationService.');
+        } catch (LogicException) {
+            $this->assertNull($merchant->fresh()->deleted_at);
+        }
+
+        try {
+            User::query()->whereKey($merchant->id)->update(['session_generation' => 999]);
+            $this->fail('Session generation updates must use UserSessionRevocationService.');
+        } catch (LogicException) {
+            $this->assertSame(1, $merchant->fresh()->session_generation);
+        }
+
+        try {
+            User::query()->whereKey($merchant->id)->delete();
+            $this->fail('Bulk user deletion must use UserSessionRevocationService.');
+        } catch (LogicException) {
+            $this->assertNull($merchant->fresh()->deleted_at);
+        }
+
+        $merchant->delete();
+        $generationAfterDelete = $merchant->session_generation;
+
+        try {
+            User::withTrashed()->whereKey($merchant->id)->restore();
+            $this->fail('Bulk user restoration must use UserSessionRevocationService.');
+        } catch (LogicException) {
+            $trashedMerchant = User::withTrashed()->findOrFail($merchant->id);
+            $this->assertNotNull($trashedMerchant->deleted_at);
+            $this->assertSame($generationAfterDelete, $trashedMerchant->session_generation);
+        }
     }
 
     public function test_factory_requires_an_explicit_valid_role_state(): void

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Builders\AppendOnlyBuilder;
+use App\Models\Concerns\ScopesToCurrentTenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,7 +15,14 @@ use LogicException;
 #[UseEloquentBuilder(AppendOnlyBuilder::class)]
 class QueueStatusHistory extends Model
 {
+    use ScopesToCurrentTenant;
+
     public $timestamps = false;
+
+    protected static function tenantOwnerRelation(): ?string
+    {
+        return 'queue';
+    }
 
     protected function casts(): array
     {

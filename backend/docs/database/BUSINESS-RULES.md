@@ -10,21 +10,21 @@ Dokumen ini mendefinisikan aturan bisnis resmi, logika keamanan multi-tenant, si
 1. **Single Database Multi-Tenant:** Seluruh tenant berbagi satu basis data MySQL pusat.
 2. **Tenant Boundary:** Tabel `stores` berfungsi sebagai batas isolasi seluruh data operasional (`nfc_cards`, `queue_sessions`, `queues`, `products`, `orders`).
 3. **Pemberian Identitas Toko Server-Side:**
-   - Backend **dilarang mempercayai nilai `store_id` yang dikirim dari payload request client pengguna terautentikasi**. Nilai `store_id` wajib dibaca server-side dari token pengguna yang login (`$request->user()->store_id`).
+   - Backend **dilarang mempercayai nilai `store_id` yang dikirim dari payload request client pengguna terautentikasi**. Nilai `store_id` wajib dibaca server-side dari user yang terautentikasi melalui session (`$request->user()->store_id`).
 4. **Batas Akses Token Pelanggan:**
    - Pelanggan publik tidak memiliki akun login.
    - Akses pelanggan dibatasi oleh `public_token` (NFC/QR) yang hanya membuka profil toko dan status antrean toko tersebut, serta `access_token` yang hanya mengizinkan pembacaan live status antrean miliknya.
 
 ### 1.2 Arsitektur Pertahanan Berlapis (Defense in Depth)
 Pencegahan kebocoran data antar-toko (*cross-tenant leakage*) ditegakkan melalui 5 lapis pengamanan:
-1. *Context Middleware:* Mengunci `current_store_id` dari user login atau token publik ke context request.
-2. *Policy & Authorization:* Memeriksa kepemilikan data (`$order->store_id === $user->store_id`).
-3. *FormRequest Validation:* Memvalidasi parameter relasi berada pada toko yang sama:
+1. *Context Middleware:* Tenant dashboard hanya berasal dari user pada session terautentikasi (`$request->user()->store_id`), bukan dari request. Tenant context bersifat request-scoped dan dibersihkan setelah request, termasuk saat terjadi exception. Context yang tidak tersedia membuat query tenant-scoped gagal tertutup.
+2. *Policy & Authorization:* Memeriksa kepemilikan data (`$order->store_id === $user->store_id`). Super Admin hanya memperoleh bypass tenant melalui route yang secara eksplisit mengaktifkan platform context dan mengotorisasi ability resource terkait.
+3. *FormRequest Validation:* Memvalidasi parameter relasi berada pada toko yang sama dan benar-benar terkait dengan parent route:
    ```php
    Rule::exists('queues', 'id')->where('store_id', $storeId)
    ```
 4. *Explicit Scope Query:* Seluruh query mutasi dan pembacaan menyertakan `->where('store_id', $storeId)` secara eksplisit.
-5. *Eloquent Global Scope:* Jaring pengaman otomatis pada model Eloquent.
+5. *Eloquent Global Scope:* Jaring pengaman otomatis pada model Eloquent. Tanpa TenantContext, scope tidak mengembalikan data tenant. Bypass scope hanya aktif selama middleware platform khusus Super Admin pada route terotorisasi; group Super Admin dasar tidak mengaktifkan bypass.
 
 ---
 
@@ -38,18 +38,28 @@ Pencegahan kebocoran data antar-toko (*cross-tenant leakage*) ditegakkan melalui
    - Kolom `users.store_id` bernilai `NULL`.
    - Memiliki wewenang lintas toko untuk registrasi toko, aktivasi kartu NFC, dan audit kepatuhan platform.
 
-### 2.2 Penegakan Keamanan Soft Delete Akun Merchant (Keputusan C3)
-- **Mekanisme:** Akun merchant dinonaktifkan menggunakan kolom **`users.deleted_at`** (Laravel `SoftDeletes`).
-- **Audit Kolom `users.is_active`:** Sesuai PRD 9.1 dan Keputusan C3, entitas `users` **tidak memiliki kolom `is_active`**. Status akun merchant murni dikendalikan oleh `users.deleted_at`. Status operasional toko diatur terpisah pada `stores.is_active`.
+### 2.2 Penegakan Keamanan Soft Delete Akun (Keputusan C3)
+- **Mekanisme:** Akun merchant dinonaktifkan menggunakan kolom **`users.deleted_at`** (Laravel `SoftDeletes`). Seluruh user soft-deleted, termasuk `super_admin`, ditolak untuk login dan request dashboard terproteksi.
+- **Audit Kolom `users.is_active`:** Entitas `users` **tidak memiliki kolom `is_active`**. Status akun merchant dikendalikan oleh `users.deleted_at`. Status operasional toko diatur terpisah pada `stores.is_active`.
 - **Preservasi Data:** Data toko (`stores`), katalog menu (`products`), tiket antrean (`queues`), pesanan (`orders`), dan riwayat audit (`audit_logs`) **tetap dipertahankan**.
 - **Akses Super Admin:** Super Admin dapat mengakses akun dan riwayat merchant terkait menggunakan `User::withTrashed()`.
 
 > **PENTING — Titik Pemeriksaan Autentikasi yang Wajib Diterapkan:**
-> 1. **Proses Login:** Query otentikasi memeriksa `WHERE deleted_at IS NULL` pada `users`, dan memeriksa status operasional toko `stores.is_active = 1`.
-> 2. **Penerbitan Token Sanctum:** Token baru ditolak jika akun berstatus soft-deleted (`deleted_at IS NOT NULL`).
-> 3. **Pencabutan Token Langsung:** Saat akun merchant di-soft-delete, seluruh token Sanctum aktif milik pengguna tersebut **wajib langsung dicabut/dihapus** (`$user->tokens()->delete()`).
-> 4. **Middleware Autentikasi API:** Setiap request API yang membawa token Sanctum memvalidasi bahwa `tokenable` (user pemilik token) belum di-soft-delete.
-> 5. **Otorisasi Endpoint Merchant:** Mencegah akses ke dashboard jika status toko nonaktif (`stores.is_active = 0`).
+> 1. **Proses Login:** Autentikasi memakai Laravel Sanctum SPA Cookie/Session dengan email dan password. User soft-deleted ditolak; `super_admin` wajib memiliki `store_id = NULL`; merchant wajib memiliki Store yang tidak soft-deleted dan `is_active = 1`.
+> 2. **Session Dashboard:** Request first-party menggunakan session cookie dan perlindungan CSRF. Dashboard tidak menerbitkan atau menggunakan Personal Access Token (PAT).
+> 3. **Session Generation:** Setiap user memiliki `users.session_generation`. Login menyimpan generation terbaru pada session browser; setiap request session dashboard membandingkannya dengan nilai database dan menolak marker yang hilang, invalid, atau stale.
+> 4. **Soft Delete dan Restore:** Semua perubahan status akun wajib melalui `UserSessionRevocationService`. Saat soft-delete maupun restore, generation dinaikkan dan seluruh session database milik user dicabut berdasarkan `user_id`. Setelah restore, user wajib login ulang; session lama tidak boleh aktif kembali.
+> 5. **Request Terproteksi:** Setiap request dashboard menolak user soft-deleted, termasuk `super_admin`. Request merchant juga memeriksa ulang bahwa Store masih valid, tidak soft-deleted, dan aktif.
+> 6. **Logout:** Session di-invalidate dan token CSRF diregenerasi. Session user yang sudah soft-deleted tidak boleh mengautentikasi request berikutnya.
+> 7. **PAT Masa Depan:** Personal Access Token dapat digunakan untuk integrasi eksternal atau aplikasi mobile di masa depan, tetapi bukan untuk dashboard browser.
+
+---
+
+### 2.3 Kepemilikan Child Resource dan Pencatatan Backend
+- `order_items` dimiliki oleh `orders`; kepemilikan Store ditentukan melalui Order. Product pada OrderItem harus berasal dari Store yang sama.
+- `queue_status_histories` dimiliki oleh `queues`; kepemilikan Store ditentukan melalui Queue.
+- Relasi Queue–QueueSession–NFC Card dan Order–Queue–NFC Card wajib divalidasi agar seluruh resource berasal dari Store yang sama.
+- `audit_logs` dan `queue_status_histories` dibuat oleh mekanisme backend yang memvalidasi aksi/transition. Dashboard/client tidak boleh mengirim catatan audit atau history secara bebas.
 
 ---
 

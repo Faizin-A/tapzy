@@ -38,7 +38,7 @@ erDiagram
         bigint store_id FK "nullable, ON DELETE RESTRICT"
         timestamp created_at
         timestamp updated_at
-        timestamp deleted_at "soft delete akun merchant"
+        timestamp deleted_at "soft delete; user terhapus tidak dapat autentikasi dashboard"
     }
 
     STORES {
@@ -193,7 +193,7 @@ Urutan Eksekusi Migration:
 1.  0001_01_01_000000_create_users_table.php (Bawaan Laravel: users, password_reset_tokens, sessions)
 2.  0001_01_01_000001_create_cache_table.php (Bawaan Laravel: cache, cache_locks)
 3.  0001_01_01_000002_create_jobs_table.php (Bawaan Laravel: jobs, job_batches, failed_jobs)
-4.  2026_11_05_140418_create_personal_access_tokens_table.php (Tersedia: Sanctum tokens)
+4.  2026_11_05_140418_create_personal_access_tokens_table.php (Tabel PAT tersedia untuk kebutuhan integrasi mendatang; bukan autentikasi dashboard)
 5.  xxxx_xx_xx_000001_create_stores_table.php (Entitas tenant utama)
 6.  xxxx_xx_xx_000002_add_tenant_columns_to_users_table.php (Menambahkan role, store_id FK [RESTRICT], dan deleted_at soft delete ke users)
 7.  xxxx_xx_xx_000003_create_nfc_cards_table.php (FK -> stores [RESTRICT])

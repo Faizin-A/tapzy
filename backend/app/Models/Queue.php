@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\ScopesToCurrentTenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Model;
@@ -18,6 +19,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 #[Hidden(['access_token_hash'])]
 class Queue extends Model
 {
+    use ScopesToCurrentTenant;
+
     protected function casts(): array
     {
         return [
