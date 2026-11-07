@@ -7,6 +7,7 @@ use App\Models\Queue;
 use App\Models\QueueStatusHistory;
 use App\Models\Store;
 use App\Models\User;
+use App\Support\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\MassAssignmentException;
 use Illuminate\Database\Schema\Blueprint;
@@ -49,6 +50,7 @@ class QueueStatusHistoryAuditLogModelTest extends TestCase
             $table->unsignedBigInteger('store_id')->nullable();
             $table->timestamps();
             $table->softDeletes();
+            $table->unsignedBigInteger('session_generation')->default(1);
         });
 
         Schema::create('queue_sessions', function (Blueprint $table) {
@@ -131,6 +133,7 @@ class QueueStatusHistoryAuditLogModelTest extends TestCase
     public function test_audit_log_relationships_json_casts_and_soft_deleted_parents(): void
     {
         $store = $this->createStore();
+        $this->useTenant($store);
         $user = $this->createSuperAdmin();
         $auditLog = $this->createAuditLog($store, $user);
 
@@ -154,7 +157,7 @@ class QueueStatusHistoryAuditLogModelTest extends TestCase
 
     public function test_history_and_audit_log_nullable_parent_fields_are_supported(): void
     {
-        [, $queue] = $this->createQueueAndActor();
+        [$store, $queue, $user] = $this->createQueueAndActor();
         $history = new QueueStatusHistory;
         $history->queue_id = $queue->id;
         $history->previous_status = null;
@@ -170,6 +173,8 @@ class QueueStatusHistoryAuditLogModelTest extends TestCase
 
         $this->assertNull($history->fresh()->changed_by_user_id);
         $this->assertNull($history->fresh()->previous_status);
+        app(TenantContext::class)->clear();
+        app(TenantContext::class)->enablePlatformAccess($user);
         $this->assertNull($auditLog->fresh()->store_id);
         $this->assertNull($auditLog->fresh()->user_id);
     }
@@ -345,10 +350,21 @@ class QueueStatusHistoryAuditLogModelTest extends TestCase
 
     private function createStore(): Store
     {
-        return Store::create([
+        $store = Store::create([
             'name' => 'History Test Store',
             'slug' => 'history-store-'.bin2hex(random_bytes(5)),
         ]);
+        $store->is_active = true;
+
+        return $store;
+    }
+
+    private function useTenant(Store $store): void
+    {
+        $user = new User;
+        $user->role = 'merchant';
+        $user->store_id = $store->getKey();
+        app(TenantContext::class)->setMerchantStore($user, $store);
     }
 
     private function createSuperAdmin(): User
@@ -368,6 +384,7 @@ class QueueStatusHistoryAuditLogModelTest extends TestCase
     private function createQueueAndActor(): array
     {
         $store = $this->createStore();
+        $this->useTenant($store);
         $session = $store->queueSessions()->create([
             'session_code' => 'HISTORY-'.bin2hex(random_bytes(4)),
             'session_date' => '2026-11-06',

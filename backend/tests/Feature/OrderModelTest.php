@@ -6,6 +6,8 @@ use App\Models\NfcCard;
 use App\Models\Order;
 use App\Models\Queue;
 use App\Models\Store;
+use App\Models\User;
+use App\Support\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -221,10 +223,17 @@ class OrderModelTest extends TestCase
 
     private function createStore(): Store
     {
-        return Store::create([
+        $store = Store::create([
             'name' => 'Order Test Store',
             'slug' => 'order-store-'.bin2hex(random_bytes(5)),
         ]);
+        $store->is_active = true;
+        $user = new User;
+        $user->role = 'merchant';
+        $user->store_id = $store->getKey();
+        app(TenantContext::class)->setMerchantStore($user, $store);
+
+        return $store;
     }
 
     private function createOrder(Store $store, string $code, ?Queue $queue = null, ?NfcCard $card = null): Order

@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Models\Builders\UserBuilder;
+use App\Services\Auth\UserSessionRevocationService;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -14,13 +16,19 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\HasApiTokens;
+use LogicException;
 
 #[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
+#[Hidden(['password', 'remember_token', 'session_generation'])]
+#[UseEloquentBuilder(UserBuilder::class)]
 class User extends Authenticatable
 {
+    private bool $sessionLifecycleMutationAllowed = false;
+
     /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
+    use HasApiTokens, HasFactory, Notifiable, SoftDeletes {
+        SoftDeletes::restore as private restoreWithoutSessionRevocation;
+    }
 
     protected static function booted(): void
     {
@@ -38,6 +46,54 @@ class User extends Authenticatable
                 ]);
             }
         });
+    }
+
+    public function delete(): ?bool
+    {
+        return app(UserSessionRevocationService::class)->softDelete(
+            $this,
+            fn (User $user): ?bool => $user->performSoftDelete(),
+        );
+    }
+
+    public function restore(): bool
+    {
+        return app(UserSessionRevocationService::class)->restore(
+            $this,
+            fn (User $user): bool => $user->performRestore(),
+        );
+    }
+
+    public function forceDelete(): ?bool
+    {
+        throw new LogicException('Hard deleting users is not supported.');
+    }
+
+    public function allowsSessionLifecycleMutation(): bool
+    {
+        return $this->sessionLifecycleMutationAllowed;
+    }
+
+    private function performSoftDelete(): ?bool
+    {
+        $this->sessionLifecycleMutationAllowed = true;
+
+        try {
+            return parent::delete();
+        } finally {
+            $this->sessionLifecycleMutationAllowed = false;
+        }
+    }
+
+    private function performRestore(): bool
+    {
+        $this->sessionLifecycleMutationAllowed = true;
+
+        try {
+            return $this->restoreWithoutSessionRevocation();
+        } finally {
+            $this->sessionLifecycleMutationAllowed = false;
+        }
     }
 
     /**
@@ -80,6 +136,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'session_generation' => 'integer',
         ];
     }
 }

@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Product;
 use App\Models\Store;
+use App\Models\User;
+use App\Support\TenantContext;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -47,6 +49,7 @@ class ProductModelTest extends TestCase
     public function test_product_and_store_relationships_work_in_both_directions(): void
     {
         $store = $this->createStore();
+        $this->useTenant($store);
         $product = $store->products()->create([
             'name' => 'Coffee',
             'price' => '12500.00',
@@ -74,6 +77,7 @@ class ProductModelTest extends TestCase
     public function test_product_soft_delete_preserves_row_and_with_trashed_can_retrieve_it(): void
     {
         $store = $this->createStore();
+        $this->useTenant($store);
         $product = $store->products()->create([
             'name' => 'Archived item',
             'price' => '42.00',
@@ -97,11 +101,51 @@ class ProductModelTest extends TestCase
         $this->assertSame('Client-supplied tenant', $product->name);
     }
 
+    public function test_product_queries_fail_closed_without_tenant_context(): void
+    {
+        $store = $this->createStore();
+        $product = $store->products()->create([
+            'name' => 'Hidden without context',
+            'price' => '10.00',
+        ]);
+
+        $this->assertFalse(Product::query()->whereKey($product->id)->exists());
+    }
+
+    public function test_product_queries_are_limited_to_the_current_store(): void
+    {
+        $firstStore = $this->createStore();
+        $firstProduct = $firstStore->products()->create([
+            'name' => 'First tenant item',
+            'price' => '10.00',
+        ]);
+        $secondStore = $this->createStore();
+        $secondProduct = $secondStore->products()->create([
+            'name' => 'Second tenant item',
+            'price' => '20.00',
+        ]);
+
+        $this->useTenant($firstStore);
+
+        $this->assertNotNull(Product::query()->find($firstProduct->id));
+        $this->assertNull(Product::query()->find($secondProduct->id));
+    }
+
     private function createStore(): Store
     {
         return Store::create([
             'name' => 'Product Test Store',
             'slug' => 'product-store-'.bin2hex(random_bytes(5)),
         ]);
+    }
+
+    private function useTenant(Store $store): void
+    {
+        $store->is_active = true;
+        $user = new User();
+        $user->role = 'merchant';
+        $user->store_id = $store->getKey();
+
+        app(TenantContext::class)->setMerchantStore($user, $store);
     }
 }

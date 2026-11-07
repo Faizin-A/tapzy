@@ -6,6 +6,8 @@ use App\Models\NfcCard;
 use App\Models\Queue;
 use App\Models\QueueSession;
 use App\Models\Store;
+use App\Models\User;
+use App\Support\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -149,6 +151,12 @@ class QueueModelTest extends TestCase
             'name' => 'Test Store',
             'slug' => 'store-'.uniqid(),
         ]);
+        $store->is_active = true;
+        $user = new User;
+        $user->role = 'merchant';
+        $user->store_id = $store->getKey();
+        app(TenantContext::class)->setMerchantStore($user, $store);
+
         $session = $store->queueSessions()->create([
             'session_code' => 'QS-'.uniqid(),
             'session_date' => '2026-11-06',

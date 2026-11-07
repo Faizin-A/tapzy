@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\ScopesToCurrentTenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,6 +14,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['quantity', 'notes'])]
 class OrderItem extends Model
 {
+    use ScopesToCurrentTenant;
+
+    protected static function tenantOwnerRelation(): ?string
+    {
+        return 'order';
+    }
+
     protected function casts(): array
     {
         return [

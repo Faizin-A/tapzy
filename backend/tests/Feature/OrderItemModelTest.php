@@ -6,6 +6,8 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\Store;
+use App\Models\User;
+use App\Support\TenantContext;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -160,6 +162,12 @@ class OrderItemModelTest extends TestCase
             'name' => 'Order Item Test Store',
             'slug' => 'order-item-store-'.bin2hex(random_bytes(5)),
         ]);
+        $store->is_active = true;
+        $user = new User;
+        $user->role = 'merchant';
+        $user->store_id = $store->getKey();
+        app(TenantContext::class)->setMerchantStore($user, $store);
+
         $product = $store->products()->create([
             'name' => 'Product at order time',
             'price' => '12.50',

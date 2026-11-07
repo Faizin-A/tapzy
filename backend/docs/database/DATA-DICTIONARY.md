@@ -8,7 +8,7 @@ Dokumen ini memuat spesifikasi teknis lengkap untuk seluruh tabel database platf
 **Tujuan Bisnis:** Menyimpan akun pengelola sistem (`super_admin`) dan pemilik/staf toko (`merchant`).
 
 > **Catatan Audit Kolom `is_active` (PRD 9.1 & Keputusan C3):**
-> Sesuai PRD 9.1, entitas `users` **tidak memiliki kolom `is_active`**. Penonaktifan akun merchant secara tegas diatur oleh Keputusan Bisnis Final C3 menggunakan mekanisme **Soft Delete (`users.deleted_at`)**. Status operasional toko diatur terpisah pada `stores.is_active`.
+> Sesuai PRD 9.1, entitas `users` **tidak memiliki kolom `is_active`**. Akun merchant dinonaktifkan dengan **Soft Delete (`users.deleted_at`)**. Semua user soft-deleted, termasuk super admin, ditolak untuk autentikasi dashboard. Status operasional toko diatur terpisah pada `stores.is_active`.
 
 | Nama Kolom | Tipe Data MySQL | Nullable | Default | Constraint / Index | Keterangan & Asal Migration |
 | :--- | :--- | :---: | :---: | :---: | :--- |
@@ -26,7 +26,7 @@ Dokumen ini memuat spesifikasi teknis lengkap untuk seluruh tabel database platf
 
 - **Foreign Key:** `store_id` REFERENCES `stores(id)` ON DELETE RESTRICT ON UPDATE CASCADE.
 - **Catatan Teknis RESTRICT:** Kolom `store_id` bersifat `NULLABLE`. Untuk `super_admin`, nilai `NULL` diizinkan sepenuhnya oleh MySQL. Namun untuk akun `merchant` yang memiliki nilai `store_id = X`, toko X tidak dapat di-hard delete secara fisik selama akun merchant masih ada.
-- **Kebijakan Soft Delete:** Akun merchant yang memiliki `deleted_at IS NOT NULL` ditolak saat autentikasi login dan token Sanctum lamanya divalidasi tidak aktif. Data historis toko dan transaksi tetap utuh dan dapat diakses oleh `super_admin` (`User::withTrashed()`).
+- **Kebijakan Soft Delete dan autentikasi:** Semua user dengan `deleted_at IS NOT NULL` ditolak saat login dan pada setiap request dashboard terproteksi. Dashboard menggunakan Sanctum SPA session cookie, bukan Personal Access Token. Data historis akun, toko, dan transaksi tetap dipertahankan; akses super admin terhadap data tersebut harus mengikuti otorisasi endpoint yang berlaku.
 
 ---
 

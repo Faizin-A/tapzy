@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Builders\AppendOnlyBuilder;
+use App\Models\Concerns\ScopesToCurrentTenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,6 +15,8 @@ use LogicException;
 #[UseEloquentBuilder(AppendOnlyBuilder::class)]
 class AuditLog extends Model
 {
+    use ScopesToCurrentTenant;
+
     public $timestamps = false;
 
     protected function casts(): array

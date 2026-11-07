@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\ScopesToCurrentTenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -20,7 +21,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 ])]
 class NfcCard extends Model
 {
-    use SoftDeletes;
+    use ScopesToCurrentTenant, SoftDeletes;
 
     protected function casts(): array
     {

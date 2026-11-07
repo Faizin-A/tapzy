@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\NfcCard;
 use App\Models\QueueSession;
 use App\Models\Store;
+use App\Models\User;
+use App\Support\TenantContext;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -110,9 +112,17 @@ class NfcCardQueueSessionModelTest extends TestCase
 
     private function createStore(): Store
     {
-        return Store::create([
+        $store = Store::create([
             'name' => 'Test Store',
             'slug' => 'store-'.uniqid(),
         ]);
+        $store->is_active = true;
+
+        $user = new User;
+        $user->role = 'merchant';
+        $user->store_id = $store->getKey();
+        app(TenantContext::class)->setMerchantStore($user, $store);
+
+        return $store;
     }
 }

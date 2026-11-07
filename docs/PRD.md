@@ -173,7 +173,7 @@ Penjual adalah pemilik atau petugas toko.
 
 Hak akses:
 
-- Login menggunakan username dan password.
+- Login menggunakan email dan password.
 - Melihat dashboard toko.
 - Mengelola profil toko.
 - Mengelola menu dan produk.
@@ -424,16 +424,18 @@ Dashboard penjual harus mudah digunakan melalui smartphone maupun desktop.
 
 Form login:
 
-- Username.
+- Email.
 - Password.
 - Tombol MASUK.
 - Lupa password.
 
 Ketentuan:
 
-- Username unik.
+- Email unik dan digunakan sebagai identitas login.
 - Password disimpan dalam bentuk hash.
-- Sesi login harus aman.
+- Dashboard menggunakan Laravel Sanctum SPA Cookie/Session Authentication dengan session cookie dan perlindungan CSRF.
+- Bearer token tidak digunakan atau disimpan di `localStorage` untuk autentikasi dashboard.
+- Session berakhir setelah 120 menit tidak aktif dan logout mengakhiri session.
 - Penjual tidak dapat masuk ke dashboard toko lain.
 - Sediakan mekanisme reset password melalui email yang sudah terdaftar.
 
@@ -1027,7 +1029,6 @@ Kolom utama:
 
 - id
 - name
-- username
 - email
 - password
 - role
@@ -1256,11 +1257,14 @@ Contoh endpoint:
 
 ## Authentication
 
+- GET /sanctum/csrf-cookie (inisialisasi cookie CSRF untuk first-party SPA)
 - POST /api/v1/auth/login
 - POST /api/v1/auth/logout
 - GET /api/v1/auth/me
 - POST /api/v1/auth/forgot-password
 - POST /api/v1/auth/reset-password
+
+Dashboard menggunakan Sanctum SPA Cookie/Session Authentication. Browser mengirim session cookie dan token CSRF pada request yang sesuai. Personal Access Token (PAT) tidak digunakan untuk dashboard dan ditunda untuk integrasi eksternal atau aplikasi mobile di masa depan. Domain stateful Sanctum dan konfigurasi cookie harus mengikuti origin frontend yang telah ditetapkan; jangan mengasumsikan origin sebelum deployment frontend dikonfirmasi.
 
 ## Public Store
 
