@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Support\TenantContext;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOneOrMany;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Foundation\Http\FormRequest;
@@ -24,8 +25,41 @@ abstract class TenantOwnedResourceRequest extends FormRequest
             return false;
         }
 
-        $routeModels = collect($this->route()?->parameters() ?? [])
-            ->filter(fn (mixed $parameter): bool => $parameter instanceof \Illuminate\Database\Eloquent\Model);
+        $parameters = $this->route()?->parameters() ?? [];
+
+        // Check required route models explicitly specified by subclass
+        foreach ($this->requiredRouteModelKeys() as $key) {
+            $param = $this->route($key);
+            if (! $param instanceof Model) {
+                return false;
+            }
+        }
+
+        // Parent and child parameters specified in boundParentChildRelations() MUST be Models
+        foreach ($this->boundParentChildRelations() as $binding) {
+            $parent = $this->route($binding['parent']);
+            $child = $this->route($binding['child']);
+
+            if (! $parent instanceof Model || ! $child instanceof Model) {
+                return false;
+            }
+        }
+
+        // If route parameters exist, all non-exempted parameters must be Eloquent Models.
+        // If route model binding did not occur, fail safely instead of granting tenant-wide collection access.
+        $exemptedParameters = $this->nonModelRouteParameters();
+        foreach ($parameters as $name => $parameter) {
+            if (in_array($name, $exemptedParameters, true)) {
+                continue;
+            }
+
+            if (! $parameter instanceof Model) {
+                return false;
+            }
+        }
+
+        $routeModels = collect($parameters)
+            ->filter(fn (mixed $parameter): bool => $parameter instanceof Model);
 
         $ability = match ($this->method()) {
             'GET', 'HEAD' => 'view',
@@ -34,8 +68,13 @@ abstract class TenantOwnedResourceRequest extends FormRequest
         };
 
         if ($routeModels->isNotEmpty()) {
-            return $routeModels->every(fn ($model): bool => Gate::forUser($user)->allows($ability, $model))
+            return $routeModels->every(fn (Model $model): bool => Gate::forUser($user)->allows($ability, $model))
                 && $this->boundParentChildRelationsMatch();
+        }
+
+        // If parent-child relations or required route models were declared but not found on route, deny
+        if (! empty($this->boundParentChildRelations()) || ! empty($this->requiredRouteModelKeys())) {
+            return false;
         }
 
         $collectionAbility = in_array($this->method(), ['GET', 'HEAD'], true) ? 'viewAny' : 'create';
@@ -48,14 +87,33 @@ abstract class TenantOwnedResourceRequest extends FormRequest
      */
     final public function rules(): array
     {
-        return array_merge($this->resourceRules(), ['store_id' => ['prohibited']]);
+        $rules = $this->resourceRules();
+        $rules['store_id'] = ['prohibited'];
+
+        return $rules;
     }
 
-    /** @return class-string<\Illuminate\Database\Eloquent\Model> */
+    /** @return class-string<Model> */
     abstract protected function resourceModelClass(): string;
 
     /** @return array<string, array<int, mixed>> */
     protected function resourceRules(): array
+    {
+        return [];
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function requiredRouteModelKeys(): array
+    {
+        return [];
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function nonModelRouteParameters(): array
     {
         return [];
     }
@@ -125,16 +183,31 @@ abstract class TenantOwnedResourceRequest extends FormRequest
                 return false;
             }
 
-            $relationship = $parent->{$binding['relation']}();
+            // Cross-store mismatch: if both parent and child have store_id, they must match
+            $parentStoreId = $parent->getAttribute('store_id');
+            $childStoreId = $child->getAttribute('store_id');
 
-            if (! $relationship instanceof HasOneOrMany) {
+            if ($parentStoreId !== null && $childStoreId !== null && (int) $parentStoreId !== (int) $childStoreId) {
                 return false;
             }
 
-            $foreignKey = $relationship->getForeignKeyName();
-            $parentKey = $relationship->getLocalKeyName();
+            $relationship = $parent->{$binding['relation']}();
 
-            if ((string) $child->getAttribute($foreignKey) !== (string) $parent->getAttribute($parentKey)) {
+            if ($relationship instanceof HasOneOrMany) {
+                $foreignKey = $relationship->getForeignKeyName();
+                $parentKey = $relationship->getLocalKeyName();
+
+                if ((string) $child->getAttribute($foreignKey) !== (string) $parent->getAttribute($parentKey)) {
+                    return false;
+                }
+            } elseif ($relationship instanceof BelongsTo) {
+                $foreignKey = $relationship->getForeignKeyName();
+                $ownerKey = $relationship->getOwnerKeyName();
+
+                if ((string) $parent->getAttribute($foreignKey) !== (string) $child->getAttribute($ownerKey)) {
+                    return false;
+                }
+            } else {
                 return false;
             }
         }

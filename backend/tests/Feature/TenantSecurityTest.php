@@ -19,7 +19,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Validation\Rules\Exists;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -343,6 +342,113 @@ class TenantSecurityTest extends TestCase
         $this->assertSame(0, Product::query()->count());
     }
 
+    public function test_route_parameters_must_be_eloquent_models_and_unbound_models_are_denied(): void
+    {
+        $store = $this->createStore('Unbound Store');
+        $merchant = $this->createMerchant($store, 'unbound@example.test');
+        $product = $this->createProduct($store, 'Unbound product');
+        $order = $this->createOrder($store, 'UNBOUND-ORDER');
+        $item = $this->createOrderItem($order, $product);
+
+        $this->authenticate($merchant);
+
+        // When a route parameter is a raw scalar string/int (unbound model), authorization must fail-closed (403)
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/tenant-security/merchant/unbound/products/'.$product->id)
+            ->assertForbidden();
+
+        // When nested parameters are unbound scalars, authorization must also fail-closed (403)
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/tenant-security/merchant/unbound/orders/'.$order->id.'/items/'.$item->id)
+            ->assertForbidden();
+    }
+
+    public function test_subclass_cannot_remove_store_id_prohibition(): void
+    {
+        $store = $this->createStore('Subclass Store');
+        $merchant = $this->createMerchant($store, 'subclass-rule@example.test');
+
+        // Confirm rules() is declared final on TenantOwnedResourceRequest
+        $reflection = new \ReflectionMethod(TenantOwnedResourceRequest::class, 'rules');
+        $this->assertTrue($reflection->isFinal(), 'rules() method must be final on TenantOwnedResourceRequest');
+
+        // Even when subclass attempts to allow store_id in resourceRules(), store_id remains prohibited
+        $this->authenticate($merchant)
+            ->postJson('/api/v1/tenant-security/merchant/test-subclass-store-id', [
+                'name' => 'Valid Name',
+                'store_id' => $store->id,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('store_id');
+    }
+
+    public function test_merchant_cannot_bypass_authorization_via_id_manipulation_across_stores(): void
+    {
+        $storeA = $this->createStore('Manipulation Store A');
+        $merchantA = $this->createMerchant($storeA, 'merchant-a@example.test');
+        $productA = $this->createProduct($storeA, 'Product A');
+        $orderA = $this->createOrder($storeA, 'ORDER-A');
+        $itemA = $this->createOrderItem($orderA, $productA);
+        $queueA = $this->createQueue($storeA, 'A-001');
+        $historyA = $this->createHistory($queueA);
+
+        $storeB = $this->createStore('Manipulation Store B');
+        $merchantB = $this->createMerchant($storeB, 'merchant-b@example.test');
+        $productB = $this->createProduct($storeB, 'Product B');
+        $orderB = $this->createOrder($storeB, 'ORDER-B');
+        $itemB = $this->createOrderItem($orderB, $productB);
+        $queueB = $this->createQueue($storeB, 'B-001');
+        $historyB = $this->createHistory($queueB);
+
+        // Merchant A cannot access Merchant B's order items
+        $this->authenticate($merchantA)
+            ->getJson('/api/v1/tenant-security/merchant/orders/'.$orderB->id.'/items/'.$itemB->id)
+            ->assertNotFound();
+
+        // Merchant A cannot access Store B's product
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/tenant-security/merchant/products/'.$productB->id)
+            ->assertNotFound();
+
+        // Merchant A cannot access Store B's queue history
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/tenant-security/merchant/queues/'.$queueB->id.'/history/'.$historyB->id)
+            ->assertNotFound();
+
+        // Merchant B cannot access Merchant A's order items
+        $this->authenticate($merchantB);
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/tenant-security/merchant/orders/'.$orderA->id.'/items/'.$itemA->id)
+            ->assertNotFound();
+
+        // Merchant B cannot access Store A's product
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/tenant-security/merchant/products/'.$productA->id)
+            ->assertNotFound();
+
+        // Merchant B cannot access Store A's queue history
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/tenant-security/merchant/queues/'.$queueA->id.'/history/'.$historyA->id)
+            ->assertNotFound();
+
+        // Merchant A cannot link Store B's queue to Order A
+        $this->authenticate($merchantA);
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/tenant-security/merchant/orders/'.$orderA->id.'/links', [
+                'queue_id' => $queueB->id,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('queue_id');
+
+        // Merchant A cannot add Store B's product to Order A
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/tenant-security/merchant/orders/'.$orderA->id.'/items', [
+                'product_id' => $productB->id,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('product_id');
+    }
+
     private function createTenantSchema(): void
     {
         Schema::create('stores', function (Blueprint $table): void {
@@ -557,6 +663,18 @@ class TenantSecurityTest extends TestCase
                 Route::get('/merchant/exception', function () {
                     throw new RuntimeException('tenant-context-test-exception');
                 });
+
+                Route::get('/merchant/unbound/products/{product}', function (TestUnboundProductRequest $request, $product) {
+                    return response()->json(['data' => ['id' => $product]]);
+                });
+
+                Route::get('/merchant/unbound/orders/{order}/items/{item}', function (TestBoundOrderItemRequest $request, $order, $item) {
+                    return response()->json(['data' => ['order' => $order, 'item' => $item]]);
+                });
+
+                Route::post('/merchant/test-subclass-store-id', function (TestSubclassAttemptingToAllowStoreIdRequest $request) {
+                    return response()->json(['success' => true]);
+                });
             });
 
             Route::middleware('dashboard.super_admin')->group(function (): void {
@@ -577,6 +695,8 @@ class TenantSecurityTest extends TestCase
 
     private function authenticate(User $user): static
     {
+        $this->withSpaOrigin()->postJson('/api/v1/auth/logout');
+
         $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
             'email' => $user->email,
             'password' => 'correct-password',
@@ -807,5 +927,29 @@ class TestQueueHistoryCreateRequest extends TenantOwnedResourceRequest
     protected function resourceModelClass(): string
     {
         return QueueStatusHistory::class;
+    }
+}
+
+class TestUnboundProductRequest extends TenantOwnedResourceRequest
+{
+    protected function resourceModelClass(): string
+    {
+        return Product::class;
+    }
+}
+
+class TestSubclassAttemptingToAllowStoreIdRequest extends TenantOwnedResourceRequest
+{
+    protected function resourceModelClass(): string
+    {
+        return Product::class;
+    }
+
+    protected function resourceRules(): array
+    {
+        return [
+            'name' => ['required', 'string'],
+            'store_id' => ['nullable', 'integer'],
+        ];
     }
 }
