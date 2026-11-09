@@ -27,6 +27,7 @@ class ProductModelTest extends TestCase
             $table->id();
             $table->string('name', 150);
             $table->string('slug', 150)->unique();
+            $table->dateTime('expires_at');
             $table->timestamps();
             $table->softDeletes();
         });
@@ -136,13 +137,14 @@ class ProductModelTest extends TestCase
         return Store::create([
             'name' => 'Product Test Store',
             'slug' => 'product-store-'.bin2hex(random_bytes(5)),
+            'expires_at' => now()->addYear(),
         ]);
     }
 
     private function useTenant(Store $store): void
     {
         $store->is_active = true;
-        $user = new User();
+        $user = new User;
         $user->role = 'merchant';
         $user->store_id = $store->getKey();
 

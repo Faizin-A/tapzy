@@ -75,10 +75,12 @@ class MySqlProductsSchemaIntegrationTest extends TestCase
     public function test_mysql_products_schema_foreign_key_indexes_and_soft_deletes(): void
     {
         $storesMigration = require database_path('migrations/2026_11_06_000000_create_stores_table.php');
+        $expiresAtMigration = require database_path('migrations/2026_11_07_000000_add_expires_at_to_stores_table.php');
         $productsMigration = require database_path('migrations/2026_11_06_000005_create_products_table.php');
 
         try {
             $storesMigration->up();
+            $expiresAtMigration->up();
             $productsMigration->up();
 
             $this->assertSame([
@@ -110,6 +112,7 @@ class MySqlProductsSchemaIntegrationTest extends TestCase
             $store = Store::create([
                 'name' => 'Product Integration Store',
                 'slug' => 'product-integration-'.bin2hex(random_bytes(6)),
+                'expires_at' => now()->addYear(),
             ]);
             $product = $store->products()->create([
                 'name' => 'Integration product',
@@ -143,6 +146,7 @@ class MySqlProductsSchemaIntegrationTest extends TestCase
             }
 
             if (Schema::hasTable('stores')) {
+                $expiresAtMigration->down();
                 $storesMigration->down();
             }
         }

@@ -74,12 +74,14 @@ class MySqlQueueSchemaIntegrationTest extends TestCase
     public function test_mysql_queue_schema_constraints_and_foreign_keys(): void
     {
         $storeMigration = require database_path('migrations/2026_11_06_000000_create_stores_table.php');
+        $expiresAtMigration = require database_path('migrations/2026_11_07_000000_add_expires_at_to_stores_table.php');
         $cardsMigration = require database_path('migrations/2026_11_06_000002_create_nfc_cards_table.php');
         $sessionsMigration = require database_path('migrations/2026_11_06_000003_create_queue_sessions_table.php');
         $queuesMigration = require database_path('migrations/2026_11_06_000004_create_queues_table.php');
 
         try {
             $storeMigration->up();
+            $expiresAtMigration->up();
             $cardsMigration->up();
             $sessionsMigration->up();
             $queuesMigration->up();
@@ -237,6 +239,7 @@ class MySqlQueueSchemaIntegrationTest extends TestCase
             }
 
             if (Schema::hasTable('stores')) {
+                $expiresAtMigration->down();
                 $storeMigration->down();
             }
         }
@@ -245,12 +248,14 @@ class MySqlQueueSchemaIntegrationTest extends TestCase
     public function test_hard_delete_card_preserves_nfc_queue_as_history(): void
     {
         $storeMigration = require database_path('migrations/2026_11_06_000000_create_stores_table.php');
+        $expiresAtMigration = require database_path('migrations/2026_11_07_000000_add_expires_at_to_stores_table.php');
         $cardsMigration = require database_path('migrations/2026_11_06_000002_create_nfc_cards_table.php');
         $sessionsMigration = require database_path('migrations/2026_11_06_000003_create_queue_sessions_table.php');
         $queuesMigration = require database_path('migrations/2026_11_06_000004_create_queues_table.php');
 
         try {
             $storeMigration->up();
+            $expiresAtMigration->up();
             $cardsMigration->up();
             $sessionsMigration->up();
             $queuesMigration->up();
@@ -301,6 +306,7 @@ class MySqlQueueSchemaIntegrationTest extends TestCase
             }
 
             if (Schema::hasTable('stores')) {
+                $expiresAtMigration->down();
                 $storeMigration->down();
             }
         }
@@ -346,6 +352,7 @@ class MySqlQueueSchemaIntegrationTest extends TestCase
         return Store::create([
             'name' => $name,
             'slug' => 'queue-test-'.bin2hex(random_bytes(6)),
+            'expires_at' => now()->addYear(),
         ]);
     }
 

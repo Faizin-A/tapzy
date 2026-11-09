@@ -43,9 +43,14 @@ class StorePolicy
         return $this->view($user, $store);
     }
 
+    public function manage(User $user, Store $store): bool
+    {
+        return ! $store->trashed() && $user->role === 'super_admin' && $this->hasPlatformAccess($user);
+    }
+
     public function delete(User $user, Store $store): bool
     {
-        return false;
+        return $this->manage($user, $store);
     }
 
     public function restore(User $user, Store $store): bool

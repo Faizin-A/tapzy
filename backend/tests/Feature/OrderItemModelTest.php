@@ -31,6 +31,7 @@ class OrderItemModelTest extends TestCase
             $table->id();
             $table->string('name', 150);
             $table->string('slug', 150)->unique();
+            $table->dateTime('expires_at');
             $table->timestamps();
             $table->softDeletes();
         });
@@ -161,6 +162,7 @@ class OrderItemModelTest extends TestCase
         $store = Store::create([
             'name' => 'Order Item Test Store',
             'slug' => 'order-item-store-'.bin2hex(random_bytes(5)),
+            'expires_at' => now()->addYear(),
         ]);
         $store->is_active = true;
         $user = new User;

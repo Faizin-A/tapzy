@@ -24,8 +24,7 @@ class TenantContext
             || $user->role !== 'merchant'
             || $user->store_id === null
             || (int) $user->store_id !== (int) $store->getKey()
-            || $store->trashed()
-            || ! $store->is_active) {
+            || ! $store->isOperational()) {
             throw new AuthorizationException('Akses tenant tidak tersedia.');
         }
 

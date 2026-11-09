@@ -37,6 +37,7 @@ class QueueStatusHistoryAuditLogModelTest extends TestCase
             $table->id();
             $table->string('name', 150);
             $table->string('slug', 150)->unique();
+            $table->dateTime('expires_at');
             $table->timestamps();
             $table->softDeletes();
         });
@@ -353,6 +354,7 @@ class QueueStatusHistoryAuditLogModelTest extends TestCase
         $store = Store::create([
             'name' => 'History Test Store',
             'slug' => 'history-store-'.bin2hex(random_bytes(5)),
+            'expires_at' => now()->addYear(),
         ]);
         $store->is_active = true;
 

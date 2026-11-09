@@ -1,6 +1,6 @@
-# TAPZY — Entity Relationship Diagram (ERD) & Architecture — v1.5.1 Final
+# TAPZY — Entity Relationship Diagram (ERD) & Architecture — v1.6 Final
 
-Dokumen ini mendefinisikan rancangan visual relasi antar tabel (ERD), dependensi foreign key, urutan migration, serta analisis integritas teknis basis data untuk platform SaaS **TAPZY** (NFC Smart Queue & Ordering Platform) berdasarkan audit koreksi kardinalitas v1.5.1.
+Dokumen ini mendefinisikan rancangan visual relasi antar tabel (ERD), dependensi foreign key, urutan migration, serta analisis integritas teknis basis data untuk platform SaaS **TAPZY** (NFC Smart Queue & Ordering Platform) berdasarkan audit koreksi kardinalitas v1.6.
 
 ---
 
@@ -9,7 +9,7 @@ Dokumen ini mendefinisikan rancangan visual relasi antar tabel (ERD), dependensi
 ```mermaid
 erDiagram
     STORES |o--o{ USERS : "memiliki merchant / staff (store_id nullable, RESTRICT)"
-    STORES ||--o{ NFC_CARDS : "memiliki kartu NFC / meja (store_id NOT NULL, RESTRICT)"
+    STORES ||--o| NFC_CARDS : "memiliki maksimal satu kartu non-deleted (store_id NOT NULL, RESTRICT)"
     STORES ||--o{ QUEUE_SESSIONS : "memiliki siklus sesi antrean (store_id NOT NULL, RESTRICT)"
     STORES ||--o{ PRODUCTS : "mengelola menu / produk (store_id NOT NULL, RESTRICT)"
     STORES ||--o{ ORDERS : "menerima transaksi pesanan (store_id NOT NULL, RESTRICT)"
@@ -53,6 +53,7 @@ erDiagram
         string queue_prefix "prefix_antrean default A"
         string ordering_mode "queue_only | queue_and_order"
         boolean is_active "status operasional toko"
+        datetime expires_at "masa berlaku UTC (input/tampil Asia/Jakarta)"
         timestamp created_at
         timestamp updated_at
         timestamp deleted_at "soft delete toko"
@@ -61,7 +62,7 @@ erDiagram
     NFC_CARDS {
         bigint id PK
         bigint store_id FK "ON DELETE RESTRICT"
-        string card_uid
+        string card_uid UK "unik global termasuk soft-deleted"
         char public_token_hash UK "SHA-256 hash"
         string label
         string type "table | queue_kiosk | counter"
@@ -72,6 +73,7 @@ erDiagram
         timestamp created_at
         timestamp updated_at
         timestamp deleted_at "soft delete kartu"
+        bigint active_store_id "virtual column unique; satu kartu non-deleted per Store"
     }
 
     QUEUE_SESSIONS {
@@ -204,6 +206,7 @@ Urutan Eksekusi Migration:
 12. xxxx_xx_xx_000008_create_order_items_table.php (FK -> orders [RESTRICT], products [SET NULL])
 13. xxxx_xx_xx_000009_create_queue_status_histories_table.php (FK -> queues [RESTRICT], users [SET NULL])
 14. xxxx_xx_xx_000010_create_audit_logs_table.php (FK -> stores [SET NULL], users [SET NULL])
+15. 2026_11_08_000000_add_nfc_card_integrity_constraints.php (UNIQUE global card_uid, virtual active_store_id, UNIQUE satu kartu non-deleted per Store)
 ```
 
 ---
@@ -248,6 +251,10 @@ Seluruh foreign key telah difinalisasi untuk memastikan perlindungan histori bis
    - Kolom virtual `queue_sessions.active_store_id` dipasangi **`UNIQUE KEY uq_store_single_active_session (active_store_id)`**.
 3. **Keunikan Kode Sesi per Toko:**
    - Kolom `queue_sessions.session_code` dipasangi **`UNIQUE KEY uq_store_session_code (store_id, session_code)`**.
+4. **Satu Kartu Non-Deleted per Store:**
+   - Kolom `nfc_cards.card_uid` dipasangi **`UNIQUE KEY uq_card_uid_global (card_uid)`**; berlaku juga untuk kartu soft-deleted.
+   - Kolom virtual `nfc_cards.active_store_id` (`CASE WHEN deleted_at IS NULL THEN store_id ELSE NULL END`) dipasangi **`UNIQUE KEY uq_store_single_card (active_store_id)`**.
+   - Constraint lama `uq_store_card_uid (store_id, card_uid)` dihapus. Soft delete membebaskan slot Store.
 
 ---
 
@@ -262,3 +269,5 @@ Seluruh foreign key telah difinalisasi untuk memastikan perlindungan histori bis
 | **v1.4** | 2026-11-05 | Penegasan ketiadaan `users.is_active`, unique `session_code`, dan pengetatan foreign key. |
 | **v1.5** | 2026-11-06 | Finalisasi reset antrean skipped, matriks foreign key deletion 16 relasi, dan kebijakan soft/hard delete. |
 | **v1.5.1 (Final)** | 2026-11-06 | **Koreksi Kardinalitas Visual Mermaid ERD:** Menyelaraskan notasi relasi nullable menggunakan `|o` dan `o|` pada 8 relasi opsional (`STORES-USERS`, `STORES-AUDIT_LOGS`, `USERS-AUDIT_LOGS`, `USERS-QUEUE_STATUS_HISTORIES`, `NFC_CARDS-QUEUES`, `NFC_CARDS-ORDERS`, `PRODUCTS-ORDER_ITEMS`, dan `QUEUES-ORDERS`), memastikan diagram Mermaid 100% presisi mencerminkan nullability kolom foreign key pada Data Dictionary v1.5. |
+| **v1.6 (Final)** | 2026-11-07 | Menambahkan `stores.expires_at` (`DATETIME`, NOT NULL, index) untuk masa berlaku Store; nilai disimpan UTC dan dikonversi ke Asia/Jakarta pada input/tampilan. |
+| **v1.7** | 2026-11-08 | Menambahkan integritas NFC Card: `card_uid` unik global, virtual `active_store_id`, maksimal satu kartu non-deleted per Store, dan penghapusan constraint lama `uq_store_card_uid`. |

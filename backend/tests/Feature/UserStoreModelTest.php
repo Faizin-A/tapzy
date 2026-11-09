@@ -30,6 +30,7 @@ class UserStoreModelTest extends TestCase
             $table->id();
             $table->string('name', 150);
             $table->string('slug', 150)->unique();
+            $table->dateTime('expires_at');
             $table->timestamps();
             $table->softDeletes();
         });
@@ -291,6 +292,7 @@ class UserStoreModelTest extends TestCase
         return Store::create([
             'name' => 'Test Store',
             'slug' => 'test-store',
+            'expires_at' => now()->addYear(),
         ]);
     }
 

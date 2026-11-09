@@ -23,6 +23,11 @@ class NfcCard extends Model
 {
     use ScopesToCurrentTenant, SoftDeletes;
 
+    protected $hidden = [
+        'card_uid',
+        'public_token_hash',
+    ];
+
     protected function casts(): array
     {
         return [
@@ -31,6 +36,18 @@ class NfcCard extends Model
             'activated_at' => 'datetime',
             'deactivated_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Determine whether the card can be used for public resolution.
+     */
+    public function isOperational(): bool
+    {
+        if ($this->trashed() || ! $this->is_active) {
+            return false;
+        }
+
+        return $this->store?->isOperational() ?? false;
     }
 
     /**

@@ -1,6 +1,6 @@
-# TAPZY — Business Rules & Architecture Constraints — v1.5 Final
+# TAPZY — Business Rules & Architecture Constraints — v1.7 Final
 
-Dokumen ini mendefinisikan aturan bisnis resmi, logika keamanan multi-tenant, siklus antrean, strategi concurrency, tata kelola token kriptografis, dan evaluasi integritas basis data untuk platform SaaS **TAPZY** (NFC Smart Queue & Ordering Platform). Dokumen ini diselaraskan secara penuh dengan **PRD v1.0**, **Keputusan Bisnis Final C1–C5**, dan **Hasil Audit Konsistensi v1.5**.
+Dokumen ini mendefinisikan aturan bisnis resmi, logika keamanan multi-tenant, siklus antrean, strategi concurrency, tata kelola token kriptografis, dan evaluasi integritas basis data untuk platform SaaS **TAPZY** (NFC Smart Queue & Ordering Platform). Dokumen ini diselaraskan secara penuh dengan **PRD v1.0**, **Keputusan Bisnis Final C1–C5**, dan **Hasil Audit Konsistensi v1.7**.
 
 ---
 
@@ -45,11 +45,11 @@ Pencegahan kebocoran data antar-toko (*cross-tenant leakage*) ditegakkan melalui
 - **Akses Super Admin:** Super Admin dapat mengakses akun dan riwayat merchant terkait menggunakan `User::withTrashed()`.
 
 > **PENTING — Titik Pemeriksaan Autentikasi yang Wajib Diterapkan:**
-> 1. **Proses Login:** Autentikasi memakai Laravel Sanctum SPA Cookie/Session dengan email dan password. User soft-deleted ditolak; `super_admin` wajib memiliki `store_id = NULL`; merchant wajib memiliki Store yang tidak soft-deleted dan `is_active = 1`.
+> 1. **Proses Login:** Autentikasi memakai Laravel Sanctum SPA Cookie/Session dengan email dan password. User soft-deleted ditolak; `super_admin` wajib memiliki `store_id = NULL`; merchant wajib memiliki Store yang tidak soft-deleted, `is_active = 1`, dan belum kedaluwarsa.
 > 2. **Session Dashboard:** Request first-party menggunakan session cookie dan perlindungan CSRF. Dashboard tidak menerbitkan atau menggunakan Personal Access Token (PAT).
 > 3. **Session Generation:** Setiap user memiliki `users.session_generation`. Login menyimpan generation terbaru pada session browser; setiap request session dashboard membandingkannya dengan nilai database dan menolak marker yang hilang, invalid, atau stale.
 > 4. **Soft Delete dan Restore:** Semua perubahan status akun wajib melalui `UserSessionRevocationService`. Saat soft-delete maupun restore, generation dinaikkan dan seluruh session database milik user dicabut berdasarkan `user_id`. Setelah restore, user wajib login ulang; session lama tidak boleh aktif kembali.
-> 5. **Request Terproteksi:** Setiap request dashboard menolak user soft-deleted, termasuk `super_admin`. Request merchant juga memeriksa ulang bahwa Store masih valid, tidak soft-deleted, dan aktif.
+> 5. **Request Terproteksi:** Setiap request dashboard menolak user soft-deleted, termasuk `super_admin`. Request merchant juga memeriksa ulang bahwa Store masih valid, tidak soft-deleted, aktif, dan belum kedaluwarsa.
 > 6. **Logout:** Session di-invalidate dan token CSRF diregenerasi. Session user yang sudah soft-deleted tidak boleh mengautentikasi request berikutnya.
 > 7. **PAT Masa Depan:** Personal Access Token dapat digunakan untuk integrasi eksternal atau aplikasi mobile di masa depan, tetapi bukan untuk dashboard browser.
 
@@ -85,6 +85,17 @@ Ketentuan historis setelah Queue dibuat:
 - Jika NFC Card yang terkait dihapus secara fisik, foreign key `ON DELETE SET NULL` mengubah `queues.nfc_card_id` menjadi `NULL`; nilai `queues.source` tetap menyimpan sumber awal, termasuk `nfc`.
 - Queue historis dengan `source = 'nfc'` dan `nfc_card_id = NULL` setelah hard delete kartu diperbolehkan. Kombinasi historis ini bukan input yang valid untuk pembuatan Queue baru.
 - Soft delete NFC Card tidak memicu aksi foreign key; `queues.nfc_card_id` tetap merujuk ke kartu tersebut.
+
+### 3.3 Aturan Manajemen Kartu NFC
+- Satu Store maksimal memiliki **satu kartu non-deleted**, termasuk kartu berstatus pending atau inactive. Ditegakkan via virtual column `nfc_cards.active_store_id` dan `UNIQUE KEY uq_store_single_card`.
+- `nfc_cards.card_uid` unik global, termasuk kartu soft-deleted. Ditegakkan via `UNIQUE KEY uq_card_uid_global`.
+- Kartu baru selalu dibuat pending: `is_active = false`, `activated_at = NULL`, `deactivated_at = NULL`. Aktivasi dilakukan melalui aksi eksplisit.
+- Create/assign kartu hanya membutuhkan Store yang tidak soft-deleted. Aktivasi dan resolusi publik hanya berjalan jika Store operasional: `is_active = true`, `expires_at` belum lewat, dan `deleted_at = NULL`.
+- Hapus kartu hanya soft delete. Soft delete membebaskan slot Store. Tidak ada restore, force delete, reassignment ke Store lain, atau pembuatan inventory kartu tanpa Store.
+- Perubahan label/tipe dan perubahan status adalah aksi terpisah. No-op tidak menulis audit atau mengubah timestamp.
+- Merchant hanya dapat melihat metadata kartu milik Store-nya. Response merchant tidak memuat `card_uid`, token, hash, atau `store_id`.
+- Plaintext token hanya dikembalikan sekali saat create. Tidak ada endpoint untuk mengambil ulang atau merotasi token. Database hanya menyimpan hash SHA-256.
+- Resolusi publik memakai lookup hash token, tidak membocorkan ID internal/UID/token/hash, dan mengembalikan 404 generik untuk token invalid, kartu tidak aktif/soft-deleted, atau Store tidak operasional. `last_used_at` hanya diperbarui setelah resolusi sukses.
 
 ---
 
@@ -158,6 +169,27 @@ Platform TAPZY membedakan secara tegas antara penghapusan logis (*soft delete*) 
 2. **Soft Delete Tidak Memicu Foreign Key `ON DELETE`:** Karena baris fisik tidak dihapus dari MySQL, aksi foreign key `ON DELETE RESTRICT`, `ON DELETE CASCADE`, atau `ON DELETE SET NULL` **tidak akan pernah terpicu** oleh operasi soft delete.
 3. **Larangan Fitur Hard Delete untuk Data Historis:** Aplikasi bisnis TAPZY tidak boleh menyediakan fitur atau endpoint API untuk melakukan hard delete fisik terhadap data historis (toko, antrean, sesi, pesanan, dan log audit).
 
+### 6.3 Kebijakan Masa Berlaku Store (`stores.expires_at`)
+1. **Wajib dan NOT NULL:** Setiap Store wajib memiliki `expires_at`. Migration `add_expires_at_to_stores_table` menambahkan kolom nullable, mem-backfill Store lama, lalu mengubahnya menjadi `NOT NULL`.
+2. **Tipe Data:** Kolom memakai `DATETIME`, bukan `TIMESTAMP`, agar dapat menyimpan tanggal jauh seperti 2099. Rentang `TIMESTAMP` MySQL berhenti pada 2038-01-19 UTC.
+3. **Timezone:** Nilai disimpan dalam **UTC**. Input dan tampilan memakai **Asia/Jakarta**. Konversi dua arah dilakukan oleh cast `App\Casts\UtcDateTime`; string input dianggap waktu Asia/Jakarta.
+4. **Nilai Transisi:** Store lama yang `expires_at`-nya NULL di-backfill `2099-12-31 23:59:59` UTC. Nilai ini adalah sentinel transisi, bukan masa berlaku bisnis final, dan wajib ditinjau serta diperbarui Super Admin.
+5. **Pemisahan Status:** `expires_at` dan `is_active` adalah dua status berbeda. Melewati `expires_at` **tidak** mengubah `is_active` secara otomatis.
+6. **Definisi Kedaluwarsa:** Store dianggap kedaluwarsa jika `expires_at <= now()`. Store dengan `expires_at` NULL dianggap kedaluwarsa (fail-closed).
+7. **Akses:** Store yang kedaluwarsa atau soft-deleted tidak boleh digunakan untuk membuat antrean/pesanan baru sesuai aturan akses endpoint yang berlaku. Login merchant, dashboard merchant, dan tenant context wajib menolak Store kedaluwarsa; akses Super Admin tidak terpengaruh.
+8. **Perbandingan SQL:** Semua perbandingan expiry di level SQL wajib memakai string UTC (`Y-m-d H:i:s`), bukan `NOW()` lokal.
+
+### 6.4 Pengelolaan Store oleh Super Admin (Batch 3.2)
+1. **Otorisasi:** Seluruh endpoint admin Store menggunakan middleware `dashboard.super_admin` + `tenant.platform`. Setiap operasi memeriksa policy (`viewAny`, `create`, `manage`, `delete`). Merchant tidak memiliki akses endpoint admin pada fase ini.
+2. **Slug:** `slug` opsional saat create; jika kosong dibuat dari `name`. Slug unik global termasuk Store yang sudah soft-deleted. Bentrok slug otomatis memakai suffix deterministik `-2`, `-3`, dst; slug eksplisit yang bentrok ditolak 422. Slug tidak dapat diubah melalui update profil pada fase ini.
+3. **Create:** `expires_at` wajib dan harus masa depan. Super Admin boleh menetapkan tanggal masa depan apa pun, termasuk mengoreksi sentinel 2099.
+4. **Update Profil:** Hanya `name`, `description`, `phone`, `address`, `google_maps_url`, `avg_service_time`, `queue_prefix`, dan `ordering_mode`. Field `is_active`, `expires_at`, `slug`, dan `store_id` ditolak 422.
+5. **Status:** Perubahan `is_active` hanya melalui endpoint status terpisah.
+6. **Expiry:** Perubahan `expires_at` hanya melalui endpoint expiry terpisah; tanggal lampau ditolak 422; perubahan expiry tidak mengubah `is_active`.
+7. **Soft Delete:** Hapus Store hanya melalui soft delete. Store soft-deleted tersembunyi dari list, detail, dan expiry alerts. Tidak ada restore, force delete, atau hard delete.
+8. **Filter & Alert:** List mendukung `search` (name/slug), `is_active`, `expiry_status=expired|expiring|valid`, dan pagination. `valid` berarti belum kedaluwarsa (termasuk yang akan kedaluwarsa). `expiring` memakai default 7 hari (batas 1..365), tidak memasukkan Store yang sudah kedaluwarsa atau sentinel 2099. Endpoint `expiry-alerts` memisahkan `expired` dan `expiring`; pagination tiap kelompok memakai `expired_page` dan `expiring_page`.
+9. **Audit:** Aksi `store.created`, `store.updated`, `store.activated`, `store.deactivated`, `store.expiry_updated`, dan `store.deleted`; `entity_type = App\Models\Store`; payload snapshot whitelist; `expires_at` UTC ISO; key sensitif diredaksi rekursif; append-only; kegagalan audit membatalkan transaksi.
+
 ---
 
 ## 7. Matriks Kebijakan Foreign Key Deletion (Database Level)
@@ -197,6 +229,8 @@ Untuk memastikan bahwa perlindungan data historis tidak hanya bergantung pada la
 - **Level Aplikasi:** Model Eloquent `AuditLog` menonaktifkan operasi mutasi normal (`update`, `delete`, `restore`). Tidak ada rute API untuk mengubah atau menghapus data audit.
 - **Pengakuan Batasan Keamanan:** Pembatasan pada model merupakan perlindungan di level aplikasi. Akses database langsung (via root MySQL/DBA) tetap membutuhkan pembatasan privilege `REVOKE UPDATE, DELETE ON audit_logs`.
 - **Integritas Relasi:** Foreign key `audit_logs.store_id` dan `audit_logs.user_id` menggunakan `ON DELETE SET NULL`.
+- **Aksi Store:** `store.created`, `store.updated`, `store.activated`, `store.deactivated`, `store.expiry_updated`, dan `store.deleted`. Payload memakai snapshot whitelist; nilai `expires_at` disimpan sebagai UTC ISO; key sensitif diredaksi rekursif; tidak ada raw request body.
+- **Aksi NFC Card:** `nfc_card.created`, `nfc_card.updated`, `nfc_card.activated`, `nfc_card.deactivated`, dan `nfc_card.deleted`. Snapshot memakai whitelist metadata kartu; plaintext token dan `public_token_hash` tidak pernah masuk audit. Penulisan audit berada dalam transaksi yang sama dengan perubahan kartu.
 
 ---
 
@@ -206,6 +240,8 @@ Untuk memastikan bahwa perlindungan data historis tidak hanya bergantung pada la
    - Plaintext token di-generate via CSPRNG (40 karakter acak) dan ditanam pada chip NFC / QR URL.
    - Database hanya menyimpan **hash SHA-256** (`CHAR(64)`).
    - Lookup URL: `WHERE public_token_hash = hash('sha256', $plainInput)`.
+   - Plaintext token hanya dikembalikan satu kali pada response create. Tidak ada endpoint untuk mengambil ulang atau merotasi token.
+   - Resolusi publik dibatasi rate limit berdasarkan IP dan hash token; plaintext token tidak boleh dicatat ke log.
 2. **Token Pelacakan Antrean Pelanggan (`queues.access_token_hash`):**
    - Plaintext token dikirim satu kali ke perangkat pelanggan saat tiket dibuat.
    - Database hanya menyimpan hash SHA-256.
@@ -225,3 +261,5 @@ Untuk memastikan bahwa perlindungan data historis tidak hanya bergantung pada la
 | **v1.3** | 2026-11-05 | Penyelarasan penuh PRD v1.0, penghapusan kolom pembayaran, dan integrasi migration Sanctum riil. |
 | **v1.4** | 2026-11-05 | Penegasan ketiadaan `users.is_active`, unique `session_code`, dan pengetatan foreign key. |
 | **v1.5 (Final)** | 2026-11-06 | **1.** Finalisasi penanganan status `skipped` saat reset antrean (resmi diubah menjadi `cancelled`).<br>**2.** Finalisasi kebijakan foreign key deletion: pengetatan menjadi **`RESTRICT`** pada `orders -> order_items`, `queues -> orders`, dan `users -> stores` untuk mencegah penghapusan kaskade data historis finansial dan operasional.<br>**3.** Penegasan eksplisit bahwa soft delete tidak memicu foreign key `ON DELETE` dan dilarang membuat fitur hard delete untuk data historis dalam alur operasional normal.<br>**4.** Audit sinkronisasi total antara ERD, Data Dictionary, dan Business Rules. |
+| **v1.6 (Final)** | 2026-11-07 | **1.** Penambahan kebijakan masa berlaku Store melalui `stores.expires_at` bertipe `DATETIME` UTC.<br>**2.** Backfill Store lama dengan `2099-12-31 23:59:59` UTC sebagai nilai transisi.<br>**3.** Penegasan bahwa `expires_at` terpisah dari `is_active` dan tidak menonaktifkan Store secara otomatis.<br>**4.** Konversi input/tampilan Asia/Jakarta melalui cast `App\Casts\UtcDateTime`. |
+| **v1.7 (Final)** | 2026-11-07 | **1.** Penambahan aturan pengelolaan Store oleh Super Admin: slug otomatis/unik, pemisahan update profil/status/expiry, soft delete, filter, dan expiry alerts.<br>**2.** Penegasan enforcement expiry pada login merchant, dashboard merchant, dan tenant context.<br>**3.** Penambahan aksi audit Store, snapshot whitelist, redaksi key sensitif, serta rollback transaksi jika audit gagal.<br>**4.** Penegasan perbandingan expiry SQL memakai string UTC, bukan `NOW()` lokal. |

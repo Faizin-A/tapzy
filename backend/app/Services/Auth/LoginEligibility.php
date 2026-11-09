@@ -18,6 +18,7 @@ class LoginEligibility
             'merchant' => $user->store_id !== null && Store::query()
                 ->whereKey($user->store_id)
                 ->where('is_active', true)
+                ->notExpired()
                 ->exists(),
             default => false,
         };

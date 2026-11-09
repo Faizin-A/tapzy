@@ -1,6 +1,6 @@
-# TAPZY — Data Dictionary (Kamus Data) — v1.5 Final
+# TAPZY — Data Dictionary (Kamus Data) — v1.7 Final
 
-Dokumen ini memuat spesifikasi teknis lengkap untuk seluruh tabel database platform SaaS **TAPZY** (NFC Smart Queue & Ordering Platform), diselaraskan secara penuh dengan **PRD v1.0**, **Keputusan Bisnis Final C1-C5**, serta hasil finalisasi audit v1.5.
+Dokumen ini memuat spesifikasi teknis lengkap untuk seluruh tabel database platform SaaS **TAPZY** (NFC Smart Queue & Ordering Platform), diselaraskan secara penuh dengan **PRD v1.0**, **Keputusan Bisnis Final C1-C5**, serta hasil finalisasi audit v1.7.
 
 ---
 
@@ -46,9 +46,15 @@ Dokumen ini memuat spesifikasi teknis lengkap untuk seluruh tabel database platf
 | `queue_prefix` | `VARCHAR(5)` | `NO` | `'A'` | - | Prefix format nomor antrean (`prefix_antrean`) |
 | `ordering_mode` | `ENUM('queue_only', 'queue_and_order')` | `NO` | `'queue_and_order'` | - | Mode pemesanan toko (`mode_pemesanan`, PRD 4.1.3/4.1.4) |
 | `is_active` | `TINYINT(1)` | `NO` | `1` | `INDEX(is_active)`| Status operasional toko (1=aktif, 0=nonaktif) (`status`) |
+| `expires_at` | `DATETIME` | `NO` | - | `INDEX(expires_at)` | Masa berlaku toko. Disimpan dalam **UTC**, input/tampilan memakai **Asia/Jakarta** melalui cast `App\Casts\UtcDateTime`. Nilai transisi `2099-12-31 23:59:59` UTC untuk data lama wajib ditinjau Super Admin. |
 | `created_at` | `TIMESTAMP` | `YES` | `NULL` | - | Waktu pendaftaran toko |
 | `updated_at` | `TIMESTAMP` | `YES` | `NULL` | - | Waktu pembaruan data toko |
 | `deleted_at` | `TIMESTAMP` | `YES` | `NULL` | `INDEX` | Soft delete timestamp |
+
+- **Kebijakan `expires_at`:** Menggunakan `DATETIME` (bukan `TIMESTAMP`) agar dapat menyimpan tanggal jauh seperti 2099. Kolom bersifat `NOT NULL`; Store lama di-backfill `2099-12-31 23:59:59` UTC sebagai nilai transisi. `expires_at` terpisah dari `is_active`; melewati masa berlaku tidak mengubah `is_active` secara otomatis.
+- **Catatan Timezone:** Nilai `expires_at` disimpan UTC dan dikonversi ke `Asia/Jakarta` saat dibaca model. Perbandingan tanggal di level SQL wajib memakai string UTC, bukan `NOW()` lokal.
+- **Pengelolaan Admin:** `slug` opsional saat create dan dibuat otomatis dari `name` jika kosong; unik global termasuk Store soft-deleted; bentrok otomatis memakai suffix `-2`, `-3`, dst. Update profil tidak mengubah `slug`, `is_active`, atau `expires_at`. Perubahan status dan expiry memakai endpoint terpisah. `expires_at` wajib masa depan; nilai lampau ditolak 422.
+- **Lifecycle:** Hapus Store hanya soft delete. Store soft-deleted tersembunyi dari list, detail, dan expiry alerts; tidak ada restore, force delete, atau hard delete. Filter list mendukung `search`, `is_active`, dan `expiry_status=expired|expiring|valid`. Expiry alert default 7 hari (batas 1..365) dan tidak memasukkan sentinel 2099 sebagai `expiring`; pagination tiap kelompok memakai `expired_page` dan `expiring_page`.
 
 ---
 
@@ -59,7 +65,7 @@ Dokumen ini memuat spesifikasi teknis lengkap untuk seluruh tabel database platf
 | :--- | :--- | :---: | :---: | :---: | :--- |
 | `id` | `BIGINT UNSIGNED` | `NO` | *AUTO_INCREMENT* | `PK` | ID unik kartu NFC |
 | `store_id` | `BIGINT UNSIGNED` | `NO` | - | `FK`, `INDEX` | Relasi toko pemilik kartu |
-| `card_uid` | `VARCHAR(100)` | `NO` | - | `INDEX` | Serial hardware chip fisik NFC |
+| `card_uid` | `VARCHAR(100)` | `NO` | - | `UNIQUE` | Serial hardware chip fisik NFC; unik global termasuk kartu soft-deleted |
 | `public_token_hash`| `CHAR(64)` | `NO` | - | `UNIQUE` | Hash SHA-256 dari token URL NDEF publik (`token`) |
 | `label` | `VARCHAR(100)` | `NO` | - | - | Label lokasi (contoh: "Meja 01", "Kios Antrean") |
 | `type` | `ENUM('table', 'queue_kiosk', 'counter')` | `NO` | `'table'` | `INDEX(type)` | Tipe peruntukan titik akses NFC |
@@ -70,10 +76,15 @@ Dokumen ini memuat spesifikasi teknis lengkap untuk seluruh tabel database platf
 | `created_at` | `TIMESTAMP` | `YES` | `NULL` | - | Waktu kartu didaftarkan |
 | `updated_at` | `TIMESTAMP` | `YES` | `NULL` | - | Waktu pembaruan kartu |
 | `deleted_at` | `TIMESTAMP` | `YES` | `NULL` | `INDEX` | Soft delete timestamp |
+| `active_store_id` | `BIGINT UNSIGNED` | `YES` | *GENERATED* | `UNIQUE` | Virtual column: `CASE WHEN deleted_at IS NULL THEN store_id ELSE NULL END`; menjaga maksimal satu kartu non-deleted per Store |
 
 - **Foreign Key:** `store_id` REFERENCES `stores(id)` ON DELETE RESTRICT ON UPDATE CASCADE *(Melindungi data aset kartu dari penghapusan fisik toko)*.
-- **Unique Constraint:** `UNIQUE KEY uq_store_card_uid (store_id, card_uid)`.
+- **Unique Constraint:**
+  - `UNIQUE KEY uq_card_uid_global (card_uid)`; berlaku juga untuk kartu soft-deleted.
+  - `UNIQUE KEY uq_store_single_card (active_store_id)`; satu Store maksimal memiliki satu kartu non-deleted. Soft delete membebaskan slot Store.
+  - Constraint lama `uq_store_card_uid (store_id, card_uid)` dihapus.
 - **Index:** `INDEX idx_store_card_status (store_id, is_active)`.
+- **Lifecycle:** Kartu baru dibuat dalam status pending (`is_active = false`, `activated_at = NULL`, `deactivated_at = NULL`). Aktivasi dilakukan eksplisit dan hanya jika Store operasional. Tidak ada reassignment, restore, force delete, atau inventory tanpa Store. Hapus kartu hanya soft delete. Merchant hanya menerima metadata kartu tanpa `card_uid`, token, hash, atau `store_id`. Plaintext token hanya dikembalikan sekali saat create dan tidak disimpan di database.
 
 ---
 
@@ -271,3 +282,5 @@ Dokumen ini memuat spesifikasi teknis lengkap untuk seluruh tabel database platf
   - `user_id` REFERENCES `users(id)` ON DELETE SET NULL ON UPDATE CASCADE.
 - **Catatan Keamanan & Privasi Data:**
   - Nilai pada `old_values` dan `new_values` dapat tetap berisi snapshot informasi historis. Penggunaan `ON DELETE SET NULL` pada foreign key menjaga kueri log tidak rusak (*orphan-safe*), namun tidak otomatis menyamarkan data pribadi di dalam payload JSON.
+  - **Audit Store:** Aksi `store.created`, `store.updated`, `store.activated`, `store.deactivated`, `store.expiry_updated`, dan `store.deleted`. Payload memakai snapshot whitelist Store; `expires_at` disimpan sebagai UTC ISO; key sensitif (`password`, `token`, `authorization`, dll.) diredaksi rekursif; tidak ada raw request body.
+  - **Atomisitas:** Penulisan audit Store dilakukan dalam transaksi yang sama dengan perubahan Store. Jika audit gagal, perubahan Store dibatalkan.

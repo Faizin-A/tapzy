@@ -11,11 +11,11 @@ use App\Models\Queue;
 use App\Models\QueueSession;
 use App\Models\QueueStatusHistory;
 use App\Models\Store;
-use App\Policies\StorePolicy;
-use App\Policies\TenantResourcePolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\OrderItemPolicy;
 use App\Policies\QueueStatusHistoryPolicy;
+use App\Policies\StorePolicy;
+use App\Policies\TenantResourcePolicy;
 use App\Support\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -47,6 +47,17 @@ class AppServiceProvider extends ServiceProvider
             return [
                 Limit::perMinute(5)->by('auth-login:'.$normalizedEmail.':'.$ip),
                 Limit::perMinute(30)->by('auth-login-ip:'.$ip),
+            ];
+        });
+
+        RateLimiter::for('nfc-resolve', function (Request $request): array {
+            $token = $request->route('token');
+            $tokenHash = is_string($token) ? hash('sha256', $token) : '';
+            $ip = (string) $request->ip();
+
+            return [
+                Limit::perMinute(60)->by('nfc-resolve-ip:'.$ip),
+                Limit::perMinute(30)->by('nfc-resolve-token:'.$tokenHash),
             ];
         });
 

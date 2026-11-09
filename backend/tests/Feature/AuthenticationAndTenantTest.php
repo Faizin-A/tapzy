@@ -41,6 +41,7 @@ class AuthenticationAndTenantTest extends TestCase
             $table->string('name', 150);
             $table->string('slug', 150)->unique();
             $table->boolean('is_active')->default(true);
+            $table->dateTime('expires_at');
             $table->timestamps();
             $table->softDeletes();
         });
@@ -660,6 +661,7 @@ class AuthenticationAndTenantTest extends TestCase
             'name' => 'Test store',
             'slug' => 'store-'.bin2hex(random_bytes(6)),
             'is_active' => $active,
+            'expires_at' => now()->addYear(),
         ]);
     }
 

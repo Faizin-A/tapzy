@@ -21,6 +21,7 @@ class EnsureActiveMerchantStore
         $store = Store::query()
             ->whereKey($user->store_id)
             ->where('is_active', true)
+            ->notExpired()
             ->first();
 
         if ($store === null) {

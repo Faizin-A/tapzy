@@ -85,6 +85,7 @@ class MySqlQueueStatusHistoryAuditLogsSchemaIntegrationTest extends TestCase
     {
         $usersMigration = require database_path('migrations/0001_01_01_000000_create_users_table.php');
         $storesMigration = require database_path('migrations/2026_11_06_000000_create_stores_table.php');
+        $expiresAtMigration = require database_path('migrations/2026_11_07_000000_add_expires_at_to_stores_table.php');
         $userTenantMigration = require database_path('migrations/2026_11_06_000001_add_tenant_columns_to_users_table.php');
         $cardsMigration = require database_path('migrations/2026_11_06_000002_create_nfc_cards_table.php');
         $sessionsMigration = require database_path('migrations/2026_11_06_000003_create_queue_sessions_table.php');
@@ -95,6 +96,7 @@ class MySqlQueueStatusHistoryAuditLogsSchemaIntegrationTest extends TestCase
         try {
             $usersMigration->up();
             $storesMigration->up();
+            $expiresAtMigration->up();
             $userTenantMigration->up();
             $cardsMigration->up();
             $sessionsMigration->up();
@@ -206,6 +208,7 @@ class MySqlQueueStatusHistoryAuditLogsSchemaIntegrationTest extends TestCase
             }
 
             if (Schema::hasTable('stores')) {
+                $expiresAtMigration->down();
                 $storesMigration->down();
             }
 
@@ -256,6 +259,7 @@ class MySqlQueueStatusHistoryAuditLogsSchemaIntegrationTest extends TestCase
         return Store::create([
             'name' => $name,
             'slug' => 'queue-audit-'.bin2hex(random_bytes(6)),
+            'expires_at' => now()->addYear(),
         ]);
     }
 

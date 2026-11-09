@@ -32,6 +32,7 @@ class QueueModelTest extends TestCase
             $table->id();
             $table->string('name', 150);
             $table->string('slug', 150)->unique();
+            $table->dateTime('expires_at');
             $table->timestamps();
             $table->softDeletes();
         });
@@ -150,6 +151,7 @@ class QueueModelTest extends TestCase
         $store = Store::create([
             'name' => 'Test Store',
             'slug' => 'store-'.uniqid(),
+            'expires_at' => now()->addYear(),
         ]);
         $store->is_active = true;
         $user = new User;
