@@ -21,6 +21,15 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
+
+        // Public bearer-token POST endpoints are stateless: they do not use
+        // cookies or the session for authorization. Keep CSRF protection for
+        // login and every authenticated Merchant/Super Admin endpoint.
+        $middleware->preventRequestForgery(except: [
+            'api/v1/public/stores/*/queues',
+            'api/v1/public/queues/*/orders',
+        ]);
+
         $middleware->alias([
             'active.user' => EnsureUserIsNotSoftDeleted::class,
             'dashboard.account' => EnsureDashboardAccountIsEligible::class,

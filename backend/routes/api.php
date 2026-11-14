@@ -4,6 +4,9 @@ use App\Http\Controllers\Api\V1\Admin\NfcCardController;
 use App\Http\Controllers\Api\V1\Admin\StoreController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\Merchant\NfcCardController as MerchantNfcCardController;
+use App\Http\Controllers\Api\V1\PublicCustomer\PublicOrderController;
+use App\Http\Controllers\Api\V1\PublicCustomer\PublicQueueTrackingController;
+use App\Http\Controllers\Api\V1\PublicCustomer\PublicStoreController;
 use App\Http\Controllers\Api\V1\PublicNfc\NfcResolutionController;
 use Illuminate\Support\Facades\Route;
 
@@ -21,8 +24,37 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware('throttle:auth-login')->post('/auth/login', [AuthController::class, 'login']);
 
+    // Stage 3 — untouched: NFC/QR handshake, updates last_used_at.
     Route::middleware('throttle:nfc-resolve')
         ->get('/public/nfc/{token}', [NfcResolutionController::class, 'show'])
+        ->where('token', '[A-Za-z0-9]{40}');
+
+    // Stage 4.1 — Public customer endpoints (read-only, no last_used_at update).
+    Route::prefix('public/stores/{token}')
+        ->where(['token' => '[A-Za-z0-9]{40}'])
+        ->group(function () {
+            Route::middleware('throttle:public-store')
+                ->get('', [PublicStoreController::class, 'show']);
+
+            Route::middleware('throttle:public-queue-status')
+                ->get('/queue-status', [PublicStoreController::class, 'queueStatus']);
+
+            Route::middleware('throttle:public-products')
+                ->get('/products', [PublicStoreController::class, 'products']);
+
+            // Stage 4.2 — Customer queue creation.
+            Route::middleware('throttle:public-queue-create')
+                ->post('/queues', [PublicStoreController::class, 'storeQueue']);
+        });
+
+    // Stage 4.3 — Customer queue tracking by access token.
+    Route::middleware('throttle:public-queue-track')
+        ->get('/public/queues/{token}', [PublicQueueTrackingController::class, 'show'])
+        ->where('token', '[A-Za-z0-9]{40}');
+
+    // Stage 4.4 — Customer order creation by queue access token.
+    Route::middleware('throttle:public-order-create')
+        ->post('/public/queues/{token}/orders', [PublicOrderController::class, 'store'])
         ->where('token', '[A-Za-z0-9]{40}');
 
     Route::middleware(['auth:sanctum', 'session.auth', 'active.user'])->group(function () {

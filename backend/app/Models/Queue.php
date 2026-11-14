@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * reject new tickets for closed sessions. Foreign keys do not enforce these rules.
  */
 #[Fillable(['customer_name', 'customer_phone', 'notes'])]
-#[Hidden(['access_token_hash'])]
+#[Hidden(['access_token_hash', 'access_token_ciphertext', 'idempotency_key_hash', 'request_payload_hash'])]
 class Queue extends Model
 {
     use ScopesToCurrentTenant;

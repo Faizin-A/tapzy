@@ -102,6 +102,18 @@ class PublicNfcResolutionTest extends TestCase
         $this->assertNotNull(DB::table('nfc_cards')->where('id', $cardId)->value('last_used_at'));
     }
 
+    public function test_browser_request_redirects_to_customer_shell_and_updates_last_used_at(): void
+    {
+        $store = $this->createStore();
+        $token = $this->token();
+        $cardId = $this->insertCard($store, $token);
+
+        $response = $this->get('/api/v1/public/nfc/'.$token, ['Accept' => 'text/html']);
+
+        $response->assertRedirect(route('customer.store', ['token' => $token]));
+        $this->assertNotNull(DB::table('nfc_cards')->where('id', $cardId)->value('last_used_at'));
+    }
+
     public function test_invalid_token_returns_generic_not_found_without_touching_last_used_at(): void
     {
         $store = $this->createStore();

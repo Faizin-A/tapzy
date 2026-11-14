@@ -61,6 +61,84 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Stage 4.1 — Public store profile (opened once per NFC/QR tap).
+        RateLimiter::for('public-store', function (Request $request): array {
+            $token = $request->route('token');
+            $tokenHash = is_string($token) ? hash('sha256', $token) : '';
+            $ip = (string) $request->ip();
+
+            return [
+                Limit::perMinute(60)->by('pstore-token:'.$tokenHash.':'.$ip),
+                Limit::perMinute(300)->by('pstore-ip:'.$ip),
+            ];
+        });
+
+        // Stage 4.1 — Public queue-status polling (called every 5-10 seconds).
+        // Per-IP-token limit allows one device to poll comfortably at a 5-second
+        // interval (12 req/min) with burst headroom. The per-IP cumulative limit
+        // protects against flooding through shared public WiFi/NAT while still
+        // supporting ~25 simultaneous devices per venue.
+        RateLimiter::for('public-queue-status', function (Request $request): array {
+            $token = $request->route('token');
+            $tokenHash = is_string($token) ? hash('sha256', $token) : '';
+            $ip = (string) $request->ip();
+
+            return [
+                Limit::perMinute(60)->by('pqs-token:'.$tokenHash.':'.$ip),
+                Limit::perMinute(300)->by('pqs-ip:'.$ip),
+            ];
+        });
+
+        // Stage 4.1 — Public product catalog (triggered on menu open and category filter).
+        RateLimiter::for('public-products', function (Request $request): array {
+            $token = $request->route('token');
+            $tokenHash = is_string($token) ? hash('sha256', $token) : '';
+            $ip = (string) $request->ip();
+
+            return [
+                Limit::perMinute(30)->by('prod-token:'.$tokenHash.':'.$ip),
+                Limit::perMinute(150)->by('prod-ip:'.$ip),
+            ];
+        });
+
+        // Stage 4.2 — Customer queue creation (state-mutating ticket issuance).
+        RateLimiter::for('public-queue-create', function (Request $request): array {
+            $token = $request->route('token');
+            $tokenHash = is_string($token) ? hash('sha256', $token) : '';
+            $ip = (string) $request->ip();
+
+            return [
+                Limit::perMinute(5)->by('pqc-token:'.$tokenHash.':'.$ip),
+                Limit::perMinute(20)->by('pqc-ip:'.$ip),
+            ];
+        });
+
+        // Stage 4.3 — Customer queue tracking by access token (read-only polling).
+        // The per-token limit supports 5–10 second polling on a single device;
+        // the cumulative per-IP limit protects shared public WiFi/NAT.
+        RateLimiter::for('public-queue-track', function (Request $request): array {
+            $token = $request->route('token');
+            $tokenHash = is_string($token) ? hash('sha256', $token) : '';
+            $ip = (string) $request->ip();
+
+            return [
+                Limit::perMinute(60)->by('pqt-token:'.$tokenHash.':'.$ip),
+                Limit::perMinute(300)->by('pqt-ip:'.$ip),
+            ];
+        });
+
+        // Stage 4.4 — Customer order creation (state-mutating, one order per queue).
+        RateLimiter::for('public-order-create', function (Request $request): array {
+            $token = $request->route('token');
+            $tokenHash = is_string($token) ? hash('sha256', $token) : '';
+            $ip = (string) $request->ip();
+
+            return [
+                Limit::perMinute(5)->by('poc-token:'.$tokenHash.':'.$ip),
+                Limit::perMinute(20)->by('poc-ip:'.$ip),
+            ];
+        });
+
         foreach ([
             NfcCard::class,
             Order::class,
