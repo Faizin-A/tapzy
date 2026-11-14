@@ -4,6 +4,10 @@ use App\Http\Controllers\Api\V1\Admin\NfcCardController;
 use App\Http\Controllers\Api\V1\Admin\StoreController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\Merchant\NfcCardController as MerchantNfcCardController;
+use App\Http\Controllers\Api\V1\Merchant\DashboardController as MerchantDashboardController;
+use App\Http\Controllers\Api\V1\Merchant\ProductController as MerchantProductController;
+use App\Http\Controllers\Api\V1\Merchant\QueueController as MerchantQueueController;
+use App\Http\Controllers\Api\V1\Merchant\QueueSessionController as MerchantQueueSessionController;
 use App\Http\Controllers\Api\V1\PublicCustomer\PublicOrderController;
 use App\Http\Controllers\Api\V1\PublicCustomer\PublicQueueTrackingController;
 use App\Http\Controllers\Api\V1\PublicCustomer\PublicStoreController;
@@ -84,6 +88,28 @@ Route::prefix('v1')->group(function () {
     Route::middleware('dashboard.merchant')
         ->prefix('merchant')
         ->group(function () {
+            Route::get('/dashboard', [MerchantDashboardController::class, 'dashboard']);
+            Route::get('/profile', [MerchantDashboardController::class, 'profile']);
+            Route::patch('/profile', [MerchantDashboardController::class, 'updateProfile']);
+            Route::get('/queue-session', [MerchantQueueSessionController::class, 'show']);
+            Route::post('/queue-session', [MerchantQueueSessionController::class, 'open']);
+            Route::patch('/queue-session/close', [MerchantQueueSessionController::class, 'close']);
+            Route::post('/queue-session/reset', [MerchantQueueSessionController::class, 'reset']);
+            Route::get('/queues', [MerchantQueueController::class, 'index']);
+            Route::post('/queues/manual', [MerchantQueueController::class, 'storeManual']);
+            Route::post('/queues/next/call', [MerchantQueueController::class, 'callNext']);
+            Route::get('/queues/{queue}', [MerchantQueueController::class, 'show'])->whereNumber('queue');
+            Route::post('/queues/{queue}/call', [MerchantQueueController::class, 'call'])->whereNumber('queue');
+            Route::post('/queues/{queue}/start', [MerchantQueueController::class, 'start'])->whereNumber('queue');
+            Route::post('/queues/{queue}/skip', [MerchantQueueController::class, 'skip'])->whereNumber('queue');
+            Route::post('/queues/{queue}/cancel', [MerchantQueueController::class, 'cancel'])->whereNumber('queue');
+            Route::post('/queues/{queue}/complete', [MerchantQueueController::class, 'complete'])->whereNumber('queue');
+            Route::get('/products', [MerchantProductController::class, 'index']);
+            Route::post('/products', [MerchantProductController::class, 'store']);
+            Route::get('/products/{product}', [MerchantProductController::class, 'show'])->whereNumber('product');
+            Route::patch('/products/{product}', [MerchantProductController::class, 'update'])->whereNumber('product');
+            Route::delete('/products/{product}', [MerchantProductController::class, 'destroy'])->whereNumber('product');
+            Route::patch('/products/{product}/status', [MerchantProductController::class, 'status'])->whereNumber('product');
             Route::get('/nfc-cards', [MerchantNfcCardController::class, 'index']);
             Route::get('/nfc-cards/{nfcCard}', [MerchantNfcCardController::class, 'show'])->whereNumber('nfcCard');
         });

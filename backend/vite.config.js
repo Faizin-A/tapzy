@@ -10,6 +10,7 @@ export default defineConfig({
                 'resources/css/app.css',
                 'resources/js/app.js',
                 'resources/js/customer/main.js',
+                'resources/js/merchant/main.js',
             ],
             refresh: true,
         }),

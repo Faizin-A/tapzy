@@ -4,6 +4,8 @@ namespace App\Services\Audit;
 
 use App\Models\AuditLog;
 use App\Models\NfcCard;
+use App\Models\Product;
+use App\Models\QueueSession;
 use App\Models\Store;
 use App\Models\User;
 
@@ -30,6 +32,20 @@ class AuditLogService
     public const NFC_CARD_DEACTIVATED = 'nfc_card.deactivated';
 
     public const NFC_CARD_DELETED = 'nfc_card.deleted';
+
+    public const PRODUCT_CREATED = 'product.created';
+
+    public const PRODUCT_UPDATED = 'product.updated';
+
+    public const PRODUCT_DELETED = 'product.deleted';
+
+    public const PRODUCT_STATUS_UPDATED = 'product.status_updated';
+
+    public const QUEUE_SESSION_OPENED = 'queue_session.opened';
+
+    public const QUEUE_SESSION_CLOSED = 'queue_session.closed';
+
+    public const QUEUE_SESSION_RESET = 'queue_session.reset';
 
     private const REDACTED = '[REDACTED]';
 
@@ -143,6 +159,85 @@ class AuditLogService
             (int) $card->store_id,
             NfcCard::class,
             (int) $card->getKey(),
+            $actor,
+            $oldValues,
+            $newValues,
+            $ipAddress,
+            $userAgent,
+        );
+    }
+
+    /**
+     * Append a product audit log entry.
+     *
+     * @param  array<string, mixed>  $oldValues
+     * @param  array<string, mixed>  $newValues
+     */
+    public function recordProduct(
+        string $action,
+        Product $product,
+        User $actor,
+        array $oldValues = [],
+        array $newValues = [],
+        ?string $ipAddress = null,
+        ?string $userAgent = null,
+    ): AuditLog {
+        return $this->recordEntity(
+            $action,
+            (int) $product->store_id,
+            Product::class,
+            (int) $product->getKey(),
+            $actor,
+            $oldValues,
+            $newValues,
+            $ipAddress,
+            $userAgent,
+        );
+    }
+
+    /** @return array<string, mixed> */
+    public function productSnapshot(Product $product): array
+    {
+        return [
+            'name' => $product->name,
+            'description' => $product->description,
+            'price' => (string) $product->price,
+            'category' => $product->category,
+            'image_url' => $product->image_url,
+            'is_available' => $product->is_available,
+            'is_active' => $product->is_active,
+            'deleted_at' => $product->deleted_at?->utc()->toIso8601String(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    public function queueSessionSnapshot(QueueSession $session): array
+    {
+        return [
+            'session_code' => $session->session_code,
+            'session_date' => $session->session_date?->toDateString(),
+            'last_queue_number' => $session->last_queue_number,
+            'status' => $session->status,
+            'opened_at' => $session->opened_at?->utc()->toIso8601String(),
+            'closed_at' => $session->closed_at?->utc()->toIso8601String(),
+        ];
+    }
+
+    /** @param array<string, mixed> $oldValues @param array<string, mixed> $newValues */
+    public function recordQueueSession(
+        string $action,
+        QueueSession $session,
+        User $actor,
+        array $oldValues = [],
+        array $newValues = [],
+        ?string $ipAddress = null,
+        ?string $userAgent = null,
+    ): AuditLog {
+        return $this->recordEntity(
+            $action,
+            (int) $session->store_id,
+            QueueSession::class,
+            (int) $session->getKey(),
             $actor,
             $oldValues,
             $newValues,

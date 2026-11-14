@@ -16,3 +16,7 @@ Route::get('/t/{token}/{any?}', function () {
 Route::get('/q/{accessToken}', function () {
     return view('customer');
 })->where('accessToken', '[A-Za-z0-9]{40}')->name('customer.order');
+
+Route::get('/merchant/{any?}', function () {
+    return view('merchant');
+})->where('any', '.*')->name('merchant.dashboard');
