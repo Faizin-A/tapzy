@@ -18,9 +18,10 @@ return new class extends Migration
                 ->nullable()
                 ->default(null);
             $table->enum('new_status', ['waiting', 'called', 'in_service', 'skipped', 'completed', 'cancelled']);
-            $table->foreignId('changed_by_user_id')
-                ->nullable()
-                ->constrained('users')
+            $table->unsignedBigInteger('changed_by_user_id')->nullable();
+            $table->foreign('changed_by_user_id', 'qsh_changed_by_user_fk')
+                ->references('id')
+                ->on('users')
                 ->nullOnDelete()
                 ->cascadeOnUpdate();
             $table->string('notes', 255)->nullable();
